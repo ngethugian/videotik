@@ -1,11 +1,14 @@
 /**
  * KAI TỒ REVIEW – AUTO VIDEO COMPOSER UI CONTROLLER (script.js)
- * Hỗ trợ tự động lấy video từ link TikTok để ghép thẳng vào ảnh nền + dự phòng tải file MP4.
+ * Hỗ trợ tự động lấy video từ link TikTok + tối ưu lưu trực tiếp vào thư viện Ảnh trên iPhone (iOS).
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
   const composer = new AutoVideoComposer('previewCanvas');
   const exporter = new AutoVideoExporter(composer);
+
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   const codecBadge = document.getElementById('codecBadge');
   const bgErrorOverlay = document.getElementById('bgErrorOverlay');
@@ -37,6 +40,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnRestartPreview = document.getElementById('btnRestartPreview');
   const previewTime = document.getElementById('previewTime');
 
+  // Khung phát lại file thành phẩm ngay dưới nút tải (tự tạo bằng JS, không cần sửa index.html)
+  const outputVideoBox = document.createElement('div');
+  outputVideoBox.className = 'hidden';
+  outputVideoBox.style.cssText = 'margin-top:12px; background:#0e0e12; border:1px solid #2a2a33; border-radius:8px; padding:10px;';
+  outputVideoBox.innerHTML = `
+    <div style="font-size:12px; color:#a1a1aa; margin-bottom:8px; font-weight:600;">
+      🎬 Video thành phẩm vừa xuất (bấm phát để kiểm tra):
+    </div>
+    <video id="outputResultVideo" controls playsinline style="width:100%; max-height:360px; border-radius:6px; background:#000;"></video>
+  `;
+  btnDownloadMp4.insertAdjacentElement('afterend', outputVideoBox);
+  const outputResultVideo = document.getElementById('outputResultVideo');
+
+  let outputBlob = null;
   let outputDownloadUrl = null;
   let outputFilename = 'KAI_TO_REVIEW.mp4';
 
@@ -45,6 +62,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       URL.revokeObjectURL(outputDownloadUrl);
       outputDownloadUrl = null;
     }
+    outputBlob = null;
+    outputResultVideo.removeAttribute('src');
+    outputResultVideo.load();
+    outputVideoBox.classList.add('hidden');
     btnDownloadMp4.classList.add('hidden');
     exportResultMessage.classList.add('hidden');
   }
@@ -62,9 +83,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
   }
 
-  /**
-   * Hàm dùng chung: nạp file MP4 (từ máy hoặc từ TikTok) vào khung xem trước bên phải
-   */
   async function attachVideoToComposer(file, sourceLabel) {
     clearPreviousOutput();
     memoryWarning.classList.add('hidden');
@@ -110,6 +128,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     bgErrorOverlay.classList.remove('hidden');
   }
 
+  // Trên điện thoại tự chọn sẵn 720p để xuất nhanh và tránh tràn RAM
+  if (isIOS || /Android|Mobile/i.test(navigator.userAgent)) {
+    exportQuality.value = '720';
+  }
+
   codecBadge.textContent = support.label;
   codecBadge.className = `codec-badge ${support.ok ? 'ok' : 'warn'}`;
 
@@ -144,7 +167,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     let videoId = '';
 
     try {
-      // Gọi cổng API công khai miễn phí lấy link MP4 không logo
       const apiRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(rawUrl)}&hd=1`);
       if (!apiRes.ok) throw new Error('Cổng lấy video TikTok tạm thời không phản hồi.');
 
@@ -165,7 +187,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       showBox(tiktokFeedback, 'info', '⏳ Đã nhận diện video TikTok! Đang tải dữ liệu vào khung ghép bên phải...');
 
-      // Tải luồng MP4 trực tiếp vào bộ nhớ trình duyệt (không cần lưu về máy người dùng)
       const videoRes = await fetch(directMp4Url);
       if (!videoRes.ok) {
         throw new Error('Trình duyệt bị chặn tải trực tiếp luồng MP4 này (CORS).');
@@ -179,7 +200,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       const file = new File([blob], `tiktok_${videoId}.mp4`, { type: 'video/mp4' });
       await attachVideoToComposer(file, 'Lấy video TikTok thành công!');
     } catch (err) {
-      // Nếu cổng API hoặc trình duyệt chặn CORS -> hiện link tải nhanh 1 chạm dự phòng
       let fallbackHtml = `⚠️ <b>Chưa tự kéo thẳng được video:</b> ${err.message}<br>`;
       if (directMp4Url) {
         fallbackHtml += `👉 <a href="${directMp4Url}" target="_blank" rel="noopener" style="color:#4ade80;font-weight:700;">Bấm vào đây để lưu nhanh file MP4 này</a>, rồi bấm nút <b>"Tải video MP4 từ máy tính"</b> bên dưới để ghép ngay.`;
@@ -194,7 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   /* =========================================================
-     3. NẠP FILE VIDEO MP4 TỪ MÁY TÍNH (DỰ PHÒNG)
+     3. NẠP FILE VIDEO MP4 TỪ MÁY TÍNH / THƯ VIỆN ẢNH
      ========================================================= */
   btnUploadMp4.addEventListener('click', () => mp4FileInput.click());
 
@@ -203,7 +223,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!file) return;
 
     try {
-      await attachVideoToComposer(file, 'Đã tải file từ máy tính!');
+      await attachVideoToComposer(file, 'Đã tải file thành công!');
     } catch (err) {
       showBox(tiktokFeedback, 'error', '❌ ' + err.message);
     }
@@ -256,17 +276,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       if (result && result.blob) {
+        outputBlob = result.blob;
         outputDownloadUrl = URL.createObjectURL(result.blob);
         outputFilename = result.filename;
         const outSizeMB = (result.blob.size / (1024 * 1024)).toFixed(2);
 
-        btnDownloadMp4.textContent = `⬇️ TẢI VIDEO ${result.format.toUpperCase()} (${outSizeMB} MB)`;
+        // Hiển thị video thành phẩm để xem lại trực tiếp
+        outputResultVideo.src = outputDownloadUrl;
+        outputVideoBox.classList.remove('hidden');
+
+        btnDownloadMp4.textContent = isIOS
+          ? `⬇️ LƯU VIDEO ${result.format.toUpperCase()} VÀO ẢNH (${outSizeMB} MB)`
+          : `⬇️ TẢI VIDEO ${result.format.toUpperCase()} (${outSizeMB} MB)`;
         btnDownloadMp4.classList.remove('hidden');
+
+        const iosHint = isIOS
+          ? '<br>📱 <b>Trên iPhone:</b> Nhấn nút xanh bên dưới → chọn <b>"Lưu video" (Save Video)</b> để lưu thẳng vào thư viện Ảnh.'
+          : '';
 
         showBox(
           exportResultMessage,
           'success',
-          `🎉 Tạo video thành công! File <b>${outputFilename}</b> (${outSizeMB} MB) đã sẵn sàng. Nhấn nút màu xanh bên dưới để tải về máy.`
+          `🎉 Tạo video thành công! File <b>${outputFilename}</b> (${outSizeMB} MB) đã sẵn sàng.${iosHint}`
         );
       }
     } catch (err) {
@@ -287,16 +318,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   /* =========================================================
-     7. NÚT TẢI VIDEO MP4 VỀ MÁY TÍNH
+     7. NÚT TẢI / LƯU VIDEO MP4 (HỖ TRỢ LƯU THẲNG VÀO ẢNH TRÊN IPHONE)
      ========================================================= */
-  btnDownloadMp4.addEventListener('click', () => {
+  function triggerDirectDownload() {
     if (!outputDownloadUrl) return;
     const a = document.createElement('a');
     a.href = outputDownloadUrl;
     a.download = outputFilename;
+    a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  btnDownloadMp4.addEventListener('click', async () => {
+    if (!outputBlob || !outputDownloadUrl) return;
+
+    // Trên iPhone: ưu tiên gọi bảng chia sẻ gốc của iOS để có nút "Lưu video" vào Ảnh
+    if (isIOS && typeof navigator.share === 'function') {
+      try {
+        const mime = outputBlob.type || 'video/mp4';
+        const file = new File([outputBlob], outputFilename, { type: mime });
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: outputFilename
+          });
+          return;
+        }
+      } catch (err) {
+        // Người dùng bấm đóng bảng chia sẻ -> không báo lỗi
+        if (err && err.name === 'AbortError') return;
+        console.warn('Web Share API trên iOS thất bại, chuyển sang tải tệp:', err);
+      }
+    }
+
+    // Dự phòng trên iOS (nếu mở bằng trình duyệt không hỗ trợ Share) hoặc dùng trên máy tính/Android
+    triggerDirectDownload();
+
+    if (isIOS) {
+      showBox(
+        exportResultMessage,
+        'info',
+        '📁 File đã được gửi tải xuống. Trên iPhone, hãy mở ứng dụng <b>Tệp (Files) → Tải về (Downloads)</b> để xem file, rồi bấm Chia sẻ → <b>Lưu video</b> để đưa vào thư viện Ảnh.'
+      );
+    }
   });
 
   window.addEventListener('beforeunload', () => {
