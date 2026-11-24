@@ -1,7 +1,6 @@
 /**
  * KAI TỒ REVIEW – REAL MP4 EXPORTER (video-export.js)
- * - Máy tính: Xuất từng khung tăng tốc GPU WebCodecs (H.264 + AAC).
- * - Điện thoại: Tự động dùng chế độ giải mã liên tục (không tua giật từng khung) để xuất nhanh gấp nhiều lần.
+ * Tương thích đầy đủ cả Windows (Chrome/Edge/Cốc Cốc), Android và iPhone (Safari iOS).
  */
 
 class AutoVideoExporter {
@@ -9,7 +8,9 @@ class AutoVideoExporter {
     this.composer = composer;
     this.isExporting = false;
     this.cancelled = false;
-    this.isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    this.isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    this.isMobile = this.isIOS || /Android|Mobile/i.test(navigator.userAgent);
   }
 
   /**
@@ -20,15 +21,17 @@ class AutoVideoExporter {
     const hasWebCodecs = typeof window.VideoEncoder !== 'undefined' && typeof window.VideoFrame !== 'undefined';
 
     if (hasMuxer && hasWebCodecs) {
-      const avcCodec = await this._pickAvcCodec(720, 1280, 30);
+      const avcCodec = await this._pickAvcCodec(720, 1280, 24);
       if (avcCodec) {
         const hasAac = typeof window.AudioEncoder !== 'undefined' && (await this._checkAacSupport());
         return {
           mode: 'webcodecs',
           hasAac,
-          label: this.isMobile
-            ? '✅ Sẵn sàng xuất MP4 (Chế độ nhanh cho điện thoại)'
-            : '✅ Sẵn sàng xuất MP4 H.264 (Tăng tốc GPU)',
+          label: this.isIOS
+            ? '✅ Sẵn sàng xuất MP4 chuẩn iPhone (H.264 + AAC)'
+            : (this.isMobile
+              ? '✅ Sẵn sàng xuất MP4 (Chế độ điện thoại)'
+              : '✅ Sẵn sàng xuất MP4 H.264 (Tăng tốc GPU)'),
           ok: true
         };
       }
@@ -43,7 +46,7 @@ class AutoVideoExporter {
       return {
         mode: 'mediarecorder',
         mimeType,
-        label: '⚠️ Chế độ dự phòng (Khuyên dùng Chrome/Safari bản mới)',
+        label: '⚠️ Chế độ dự phòng (Khuyên dùng Safari/Chrome bản mới)',
         ok: false
       };
     }
@@ -56,7 +59,11 @@ class AutoVideoExporter {
   }
 
   async _pickAvcCodec(width, height, fps) {
-    const codecs = ['avc1.64002a', 'avc1.4d002a', 'avc1.640028', 'avc1.420028', 'avc1.42001f'];
+    // Trên iPhone ưu tiên Main/Baseline Profile để ứng dụng Ảnh (Photos) luôn mở được
+    const codecs = this.isIOS
+      ? ['avc1.4d002a', 'avc1.4d001f', 'avc1.42001f', 'avc1.64002a']
+      : ['avc1.64002a', 'avc1.4d002a', 'avc1.640028', 'avc1.420028', 'avc1.42001f'];
+
     for (const codec of codecs) {
       try {
         const res = await VideoEncoder.isConfigSupported({
@@ -65,7 +72,7 @@ class AutoVideoExporter {
           height,
           bitrate: 5_000_000,
           framerate: fps,
-          hardwareAcceleration: 'prefer-hardware'
+          avc: { format: 'avc' }
         });
         if (res.supported) return codec;
       } catch (_) {}
@@ -112,6 +119,7 @@ class AutoVideoExporter {
     this.cancelled = false;
     this.composer.pausePreview();
 
+    const effectiveFps = this.isMobile ? 24 : fps;
     const support = await this.checkSupport();
     const { width, height } = this._getOutputSize(quality);
 
@@ -120,7 +128,7 @@ class AutoVideoExporter {
         const blob = await this._renderWithWebCodecs({
           width,
           height,
-          fps,
+          fps: effectiveFps,
           includeAudio: support.hasAac,
           onProgress
         });
@@ -133,7 +141,7 @@ class AutoVideoExporter {
         const blob = await this._renderWithMediaRecorder({
           width,
           height,
-          fps,
+          fps: effectiveFps,
           mimeType: support.mimeType,
           onProgress
         });
@@ -144,7 +152,7 @@ class AutoVideoExporter {
           filename: `KAI_TO_REVIEW_${quality}p_${Date.now()}.${ext}`
         };
       } else {
-        throw new Error('Trình duyệt không hỗ trợ xuất MP4. Hãy mở website bằng Chrome, Edge, Safari hoặc Cốc Cốc bản mới.');
+        throw new Error('Trình duyệt không hỗ trợ xuất MP4. Hãy mở website bằng Safari (iPhone) hoặc Chrome/Cốc Cốc.');
       }
     } finally {
       this.isExporting = false;
@@ -152,7 +160,7 @@ class AutoVideoExporter {
   }
 
   /* =========================================================
-     PHƯƠNG ÁN CHÍNH: WEBCODECS (H.264 + AAC) + MP4-MUXER
+     PHƯƠNG ÁN CHÍNH: WEBCODECS (H.264 AVCC + AAC) + MP4-MUXER
      ========================================================= */
   async _renderWithWebCodecs({ width, height, fps, includeAudio, onProgress }) {
     const duration = this.composer.videoEl.duration;
@@ -160,9 +168,12 @@ class AutoVideoExporter {
       throw new Error('Không xác định được thời lượng video đầu vào.');
     }
 
+    const totalFrames = Math.max(1, Math.ceil(duration * fps));
+    const frameDurationUs = Math.round(1_000_000 / fps);
     const avcCodec = await this._pickAvcCodec(width, height, fps);
+
     if (!avcCodec) {
-      throw new Error(`Thiết bị không hỗ trợ mã hóa H.264 ở mức ${width}×${height}. Hãy chuyển sang HD 720p.`);
+      throw new Error(`Thiết bị không hỗ trợ mã hóa H.264 ở mức ${width}×${height}. Hãy chọn HD 720p.`);
     }
 
     // Bước 1: Giải mã âm thanh gốc của video
@@ -198,10 +209,14 @@ class AutoVideoExporter {
 
     if (this.cancelled) throw new Error('Đã hủy quá trình tạo video.');
 
-    // Bước 4: Khởi tạo VideoEncoder H.264
+    // Bước 4: Khởi tạo VideoEncoder H.264 chuẩn AVCC (bắt buộc để iPhone đọc được)
     let encodeError = null;
+    let encodedChunksCount = 0;
     const videoEncoder = new VideoEncoder({
-      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      output: (chunk, meta) => {
+        encodedChunksCount++;
+        muxer.addVideoChunk(chunk, meta);
+      },
       error: (err) => { encodeError = err; }
     });
 
@@ -209,21 +224,25 @@ class AutoVideoExporter {
       ? (width >= 1080 ? 5_000_000 : 3_200_000)
       : (width >= 1080 ? 8_000_000 : 4_500_000);
 
-    videoEncoder.configure({
+    const encoderConfig = {
       codec: avcCodec,
       width,
       height,
       bitrate,
       framerate: fps,
-      hardwareAcceleration: 'prefer-hardware'
-    });
+      avc: { format: 'avc' }
+    };
+    if (!this.isIOS) {
+      encoderConfig.hardwareAcceleration = 'prefer-hardware';
+    }
+    videoEncoder.configure(encoderConfig);
 
     const offCanvas = document.createElement('canvas');
     offCanvas.width = width;
     offCanvas.height = height;
     const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-    // Tạo phần tử video chạy ngầm (gắn ẩn vào body để iOS Safari / Android Chrome không bị treo)
+    // Đặt video giải mã ngay góc màn hình (không đặt -9999px vì Safari iOS sẽ ngừng giải mã video ngoài khung nhìn)
     const workerVideo = document.createElement('video');
     workerVideo.src = this.composer.videoUrl;
     workerVideo.muted = true;
@@ -231,7 +250,7 @@ class AutoVideoExporter {
     workerVideo.setAttribute('playsinline', '');
     workerVideo.setAttribute('muted', '');
     workerVideo.preload = 'auto';
-    workerVideo.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0.01;pointer-events:none;';
+    workerVideo.style.cssText = 'position:fixed;right:0;bottom:0;width:4px;height:4px;opacity:0.01;pointer-events:none;z-index:-1;';
     document.body.appendChild(workerVideo);
 
     await new Promise((resolve, reject) => {
@@ -241,49 +260,47 @@ class AutoVideoExporter {
     });
 
     try {
-      let usedFastMobileMode = false;
+      for (let i = 0; i < totalFrames; i++) {
+        if (this.cancelled) throw new Error('Đã hủy quá trình tạo video.');
+        if (encodeError) throw encodeError;
 
-      // TRÊN ĐIỆN THOẠI: Dùng chế độ phát ngầm liên tục (không seek từng khung -> nhanh hơn 5-8 lần)
-      if (this.isMobile) {
-        try {
-          await this._encodeFramesContinuous({
-            workerVideo,
-            offCanvas,
-            offCtx,
-            width,
-            height,
-            fps,
-            duration,
-            videoEncoder,
-            getError: () => encodeError,
-            onProgress
-          });
-          usedFastMobileMode = true;
-        } catch (mobileErr) {
-          if (this.cancelled || encodeError) throw mobileErr;
-          console.warn('Chuyển về chế độ từng khung dự phòng:', mobileErr);
+        const targetTime = Math.min(i / fps, Math.max(0, duration - 0.02));
+        await this._seekVideo(workerVideo, targetTime);
+
+        // Chờ 1 nhịp vẽ trình duyệt để Safari iOS cập nhật xong khung hình video mới nhất
+        if (this.isIOS) {
+          await new Promise(r => requestAnimationFrame(r));
         }
-      }
 
-      // TRÊN MÁY TÍNH (hoặc dự phòng nếu điện thoại chặn play ngầm): Chế độ từng khung chính xác
-      if (!usedFastMobileMode) {
-        await this._encodeFramesBySeek({
-          workerVideo,
-          offCanvas,
-          offCtx,
-          width,
-          height,
-          fps: this.isMobile ? 24 : fps,
-          duration,
-          videoEncoder,
-          getError: () => encodeError,
-          onProgress
+        // Vẽ ảnh nền gốc + video đúng vùng bên phải lên canvas xuất
+        this.composer.composeFrame(offCtx, width, height, workerVideo, true);
+
+        const frame = new VideoFrame(offCanvas, {
+          timestamp: i * frameDurationUs,
+          duration: frameDurationUs
         });
+
+        videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+        frame.close();
+
+        while (videoEncoder.encodeQueueSize > 6) {
+          await new Promise(r => setTimeout(r, 8));
+        }
+
+        if (i % 3 === 0 || i === totalFrames - 1) {
+          const pct = 10 + Math.round(((i + 1) / totalFrames) * 86);
+          onProgress?.(pct, `Đang ghép & mã hóa khung hình ${i + 1}/${totalFrames}...`);
+        }
       }
 
       onProgress?.(97, 'Đang đóng gói file MP4 hoàn chỉnh...');
       await videoEncoder.flush();
       videoEncoder.close();
+
+      if (encodedChunksCount === 0) {
+        throw new Error('Không mã hóa được khung hình nào trên thiết bị này.');
+      }
+
       muxer.finalize();
 
       onProgress?.(100, 'Tạo video MP4 hoàn tất!');
@@ -300,126 +317,6 @@ class AutoVideoExporter {
       workerVideo.remove();
       if (videoEncoder.state !== 'closed') {
         try { videoEncoder.close(); } catch (_) {}
-      }
-    }
-  }
-
-  /**
-   * Chế độ tối ưu cho điện thoại: phát video liên tục và bắt từng khung hình giải mã phần cứng
-   */
-  async _encodeFramesContinuous({ workerVideo, offCanvas, offCtx, width, height, fps, duration, videoEncoder, getError, onProgress }) {
-    workerVideo.currentTime = 0;
-    await this._seekVideo(workerVideo, 0);
-
-    let lastTsUs = -1;
-    let frameCount = 0;
-    const minStepUs = Math.floor((1_000_000 / fps) * 0.78);
-
-    const captureFrame = (mediaTimeSec) => {
-      const tsUs = frameCount === 0 ? 0 : Math.round(mediaTimeSec * 1_000_000);
-      if (tsUs <= lastTsUs) return;
-      if (frameCount > 0 && (tsUs - lastTsUs) < minStepUs) return;
-      if (videoEncoder.encodeQueueSize > 8) return;
-
-      this.composer.composeFrame(offCtx, width, height, workerVideo, true);
-      const frame = new VideoFrame(offCanvas, { timestamp: tsUs });
-      videoEncoder.encode(frame, { keyFrame: frameCount % (fps * 2) === 0 });
-      frame.close();
-
-      lastTsUs = tsUs;
-      frameCount++;
-
-      const pct = 10 + Math.min(86, Math.round((mediaTimeSec / duration) * 86));
-      onProgress?.(pct, `Đang ghép tối ưu điện thoại (${mediaTimeSec.toFixed(1)}s / ${duration.toFixed(1)}s)...`);
-    };
-
-    // Ghi sẵn khung hình đầu tiên ở giây 0
-    captureFrame(0);
-
-    await workerVideo.play();
-
-    await new Promise((resolve, reject) => {
-      let done = false;
-      const finish = (err) => {
-        if (done) return;
-        done = true;
-        workerVideo.pause();
-        workerVideo.removeEventListener('ended', onEnded);
-        workerVideo.removeEventListener('error', onError);
-        if (err) reject(err);
-        else resolve();
-      };
-
-      const onEnded = () => finish();
-      const onError = () => finish(new Error('Lỗi đọc video khi xuất trên điện thoại.'));
-      workerVideo.addEventListener('ended', onEnded);
-      workerVideo.addEventListener('error', onError);
-
-      const hasRVFC = typeof workerVideo.requestVideoFrameCallback === 'function';
-
-      const onTick = (now, metadata) => {
-        if (done) return;
-        if (this.cancelled) return finish(new Error('Đã hủy quá trình tạo video.'));
-        const encErr = getError();
-        if (encErr) return finish(encErr);
-
-        const mediaTime = (metadata && typeof metadata.mediaTime === 'number')
-          ? metadata.mediaTime
-          : workerVideo.currentTime;
-
-        captureFrame(mediaTime);
-
-        if (workerVideo.ended || mediaTime >= duration - 0.04) {
-          return finish();
-        }
-
-        if (hasRVFC) {
-          workerVideo.requestVideoFrameCallback(onTick);
-        } else {
-          requestAnimationFrame(() => onTick(performance.now(), null));
-        }
-      };
-
-      if (hasRVFC) {
-        workerVideo.requestVideoFrameCallback(onTick);
-      } else {
-        requestAnimationFrame(() => onTick(performance.now(), null));
-      }
-    });
-  }
-
-  /**
-   * Chế độ cho máy tính (tua từng khung hình chính xác, tận dụng GPU RTX)
-   */
-  async _encodeFramesBySeek({ workerVideo, offCanvas, offCtx, width, height, fps, duration, videoEncoder, getError, onProgress }) {
-    const totalFrames = Math.max(1, Math.ceil(duration * fps));
-    const frameDurationUs = Math.round(1_000_000 / fps);
-
-    for (let i = 0; i < totalFrames; i++) {
-      if (this.cancelled) throw new Error('Đã hủy quá trình tạo video.');
-      const encErr = getError();
-      if (encErr) throw encErr;
-
-      const targetTime = Math.min(i / fps, Math.max(0, duration - 0.02));
-      await this._seekVideo(workerVideo, targetTime);
-
-      this.composer.composeFrame(offCtx, width, height, workerVideo, true);
-
-      const frame = new VideoFrame(offCanvas, {
-        timestamp: i * frameDurationUs,
-        duration: frameDurationUs
-      });
-
-      videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-      frame.close();
-
-      while (videoEncoder.encodeQueueSize > 8) {
-        await new Promise(r => setTimeout(r, 8));
-      }
-
-      if (i % 3 === 0 || i === totalFrames - 1) {
-        const pct = 10 + Math.round(((i + 1) / totalFrames) * 86);
-        onProgress?.(pct, `Đang ghép & mã hóa khung hình ${i + 1}/${totalFrames}...`);
       }
     }
   }
