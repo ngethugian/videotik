@@ -1,12 +1,12 @@
 /**
  * KAI TỒ REVIEW – AUTO VIDEO COMPOSER UI CONTROLLER (script.js)
+ * Hỗ trợ tự động lấy video từ link TikTok để ghép thẳng vào ảnh nền + dự phòng tải file MP4.
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
   const composer = new AutoVideoComposer('previewCanvas');
   const exporter = new AutoVideoExporter(composer);
 
-  // Phần tử giao diện
   const codecBadge = document.getElementById('codecBadge');
   const bgErrorOverlay = document.getElementById('bgErrorOverlay');
   const tiktokUrlInput = document.getElementById('tiktokUrlInput');
@@ -37,7 +37,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnRestartPreview = document.getElementById('btnRestartPreview');
   const previewTime = document.getElementById('previewTime');
 
-  // Lưu file MP4 đã tạo xong để nút TẢI VIDEO MP4 sử dụng (và giải phóng khi tạo lại)
   let outputDownloadUrl = null;
   let outputFilename = 'KAI_TO_REVIEW.mp4';
 
@@ -63,6 +62,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `${String(m).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
   }
 
+  /**
+   * Hàm dùng chung: nạp file MP4 (từ máy hoặc từ TikTok) vào khung xem trước bên phải
+   */
+  async function attachVideoToComposer(file, sourceLabel) {
+    clearPreviousOutput();
+    memoryWarning.classList.add('hidden');
+    tiktokEmbedWrap.classList.add('hidden');
+    tiktokEmbedWrap.innerHTML = '';
+
+    const info = await composer.loadVideoFile(file);
+    const sizeMB = info.sizeBytes / (1024 * 1024);
+
+    metaFileName.textContent = info.name;
+    metaResolution.textContent = `${info.width} × ${info.height}`;
+    metaDuration.textContent = `${info.duration.toFixed(1)} giây`;
+    metaSize.textContent = `${sizeMB.toFixed(1)} MB`;
+    videoMetaBox.classList.remove('hidden');
+
+    if (sizeMB > 250 || info.duration > 300) {
+      memoryWarning.textContent =
+        `⚠️ Video khá nặng (${sizeMB.toFixed(0)} MB, ${Math.round(info.duration)}s). ` +
+        `Nên đóng bớt tab khác hoặc chọn 720p để xuất nhanh hơn.`;
+      memoryWarning.classList.remove('hidden');
+    }
+
+    btnPlayPreview.disabled = false;
+    btnRestartPreview.disabled = false;
+    btnCreateVideo.disabled = !composer.bgLoaded;
+
+    showBox(
+      tiktokFeedback,
+      'success',
+      `✅ ${sourceLabel} Đã tự động ghép video vào đúng vùng bên phải! Bấm <b>Phát thử</b> hoặc bấm <b>TẠO VIDEO</b> ngay.`
+    );
+  }
+
   /* =========================================================
      1. KHỞI TẠO: NẠP ẢNH NỀN CỐ ĐỊNH & KIỂM TRA CODEC
      ========================================================= */
@@ -79,9 +114,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   codecBadge.className = `codec-badge ${support.ok ? 'ok' : 'warn'}`;
 
   /* =========================================================
-     2. XỬ LÝ Ô NHẬP LINK TIKTOK (MINH BẠCH, KHÔNG GIẢ LẬP)
+     2. DÁN LINK TIKTOK -> TỰ LẤY MP4 VÀ GHÉP THẲNG LÊN ẢNH NỀN
      ========================================================= */
-  btnConfirmLink.addEventListener('click', () => {
+  btnConfirmLink.addEventListener('click', async () => {
     const rawUrl = tiktokUrlInput.value.trim();
     tiktokEmbedWrap.classList.add('hidden');
     tiktokEmbedWrap.innerHTML = '';
@@ -91,50 +126,75 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    // Kiểm tra định dạng link TikTok hợp lệ
     const isTikTokDomain = /^https?:\/\/(www\.|m\.|vt\.|vm\.)?tiktok\.com\/.+/i.test(rawUrl);
     if (!isTikTokDomain) {
       showBox(
         tiktokFeedback,
         'error',
-        '❌ Đường link không hợp lệ. Link phải thuộc tên miền <b>tiktok.com</b> (ví dụ: https://www.tiktok.com/@tenkenh/video/123456...).'
+        '❌ Link không hợp lệ. Link phải thuộc tên miền <b>tiktok.com</b>.'
       );
       return;
     }
 
-    // Kiểm tra xem có lấy được Video ID để nhúng TikTok Embed xem trước không
-    const idMatch = rawUrl.match(/\/video\/(\d+)/i);
-    if (idMatch) {
-      const videoId = idMatch[1];
-      tiktokEmbedWrap.innerHTML = `
-        <iframe
-          src="https://www.tiktok.com/embed/v2/${videoId}"
-          allow="autoplay; encrypted-media"
-          allowfullscreen
-          title="TikTok Embed">
-        </iframe>`;
-      tiktokEmbedWrap.classList.remove('hidden');
+    btnConfirmLink.disabled = true;
+    btnConfirmLink.textContent = 'Đang lấy video...';
+    showBox(tiktokFeedback, 'info', '⏳ Đang phân tích link TikTok và tự động kéo luồng MP4 vào khung ghép...');
 
-      showBox(
-        tiktokFeedback,
-        'info',
-        '✅ Đã nhận diện link TikTok hợp lệ và hiển thị khung nhúng xem trước.<br>' +
-        '<b>Lưu ý kỹ thuật:</b> TikTok chỉ cho phép phát video nhúng, không cung cấp trực tiếp luồng file MP4 cho trình duyệt ghép xuất do cơ chế bảo vệ bản quyền (CORS). ' +
-        'Vui lòng <b>tải file MP4 của video này từ máy tính</b> bằng nút màu đỏ bên dưới để hệ thống tự động ghép vào ảnh nền và xuất MP4.'
-      );
-    } else {
-      // Link rút gọn vt.tiktok.com / vm.tiktok.com không chứa ID trực tiếp
-      showBox(
-        tiktokFeedback,
-        'info',
-        '⚠️ Link TikTok dạng rút gọn không cho phép trình duyệt truy cập trực tiếp luồng video để ghép xuất MP4. ' +
-        'Hãy bấm nút <b>"Tải video MP4 từ máy tính"</b> bên dưới để chọn file video bạn đã lưu.'
-      );
+    let directMp4Url = '';
+    let videoId = '';
+
+    try {
+      // Gọi cổng API công khai miễn phí lấy link MP4 không logo
+      const apiRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(rawUrl)}&hd=1`);
+      if (!apiRes.ok) throw new Error('Cổng lấy video TikTok tạm thời không phản hồi.');
+
+      const data = await apiRes.json();
+      if (data.code !== 0 || !data.data) {
+        throw new Error(data.msg || 'Không tìm thấy video (link có thể đang để riêng tư hoặc là bài đăng ảnh).');
+      }
+
+      videoId = data.data.id || String(Date.now());
+      directMp4Url = data.data.hdplay || data.data.play || data.data.wmplay || '';
+      if (directMp4Url.startsWith('/')) {
+        directMp4Url = 'https://www.tikwm.com' + directMp4Url;
+      }
+
+      if (!directMp4Url) {
+        throw new Error('Link này không phải video MP4 (có thể là bài đăng ảnh trượt TikTok).');
+      }
+
+      showBox(tiktokFeedback, 'info', '⏳ Đã nhận diện video TikTok! Đang tải dữ liệu vào khung ghép bên phải...');
+
+      // Tải luồng MP4 trực tiếp vào bộ nhớ trình duyệt (không cần lưu về máy người dùng)
+      const videoRes = await fetch(directMp4Url);
+      if (!videoRes.ok) {
+        throw new Error('Trình duyệt bị chặn tải trực tiếp luồng MP4 này (CORS).');
+      }
+
+      const blob = await videoRes.blob();
+      if (!blob || blob.size < 10000) {
+        throw new Error('Dữ liệu video trả về không đầy đủ.');
+      }
+
+      const file = new File([blob], `tiktok_${videoId}.mp4`, { type: 'video/mp4' });
+      await attachVideoToComposer(file, 'Lấy video TikTok thành công!');
+    } catch (err) {
+      // Nếu cổng API hoặc trình duyệt chặn CORS -> hiện link tải nhanh 1 chạm dự phòng
+      let fallbackHtml = `⚠️ <b>Chưa tự kéo thẳng được video:</b> ${err.message}<br>`;
+      if (directMp4Url) {
+        fallbackHtml += `👉 <a href="${directMp4Url}" target="_blank" rel="noopener" style="color:#4ade80;font-weight:700;">Bấm vào đây để lưu nhanh file MP4 này</a>, rồi bấm nút <b>"Tải video MP4 từ máy tính"</b> bên dưới để ghép ngay.`;
+      } else {
+        fallbackHtml += `Hãy thử lại sau vài giây hoặc bấm nút <b>"Tải video MP4 từ máy tính"</b> bên dưới.`;
+      }
+      showBox(tiktokFeedback, 'error', fallbackHtml);
+    } finally {
+      btnConfirmLink.disabled = false;
+      btnConfirmLink.textContent = 'Xác nhận link';
     }
   });
 
   /* =========================================================
-     3. NẠP FILE VIDEO MP4 TỪ MÁY TÍNH -> TỰ ĐỘNG GHÉP NGAY
+     3. NẠP FILE VIDEO MP4 TỪ MÁY TÍNH (DỰ PHÒNG)
      ========================================================= */
   btnUploadMp4.addEventListener('click', () => mp4FileInput.click());
 
@@ -142,38 +202,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const file = e.target.files[0];
     if (!file) return;
 
-    clearPreviousOutput();
-    memoryWarning.classList.add('hidden');
-    tiktokEmbedWrap.classList.add('hidden');
-    tiktokEmbedWrap.innerHTML = '';
-
     try {
-      const info = await composer.loadVideoFile(file);
-      const sizeMB = info.sizeBytes / (1024 * 1024);
-
-      metaFileName.textContent = info.name;
-      metaResolution.textContent = `${info.width} × ${info.height}`;
-      metaDuration.textContent = `${info.duration.toFixed(1)} giây`;
-      metaSize.textContent = `${sizeMB.toFixed(1)} MB`;
-      videoMetaBox.classList.remove('hidden');
-
-      // Cảnh báo nếu video quá lớn hoặc quá dài
-      if (sizeMB > 250 || info.duration > 300) {
-        memoryWarning.textContent =
-          `⚠️ Video khá nặng (${sizeMB.toFixed(0)} MB, ${Math.round(info.duration)}s). ` +
-          `Quá trình xuất trên trình duyệt sẽ tốn thời gian và RAM hơn bình thường; khuyên đóng bớt các tab khác hoặc chọn mức 720p nếu cần xuất nhanh.`;
-        memoryWarning.classList.remove('hidden');
-      }
-
-      btnPlayPreview.disabled = false;
-      btnRestartPreview.disabled = false;
-      btnCreateVideo.disabled = !composer.bgLoaded;
-
-      showBox(
-        tiktokFeedback,
-        'success',
-        '✅ Đã tự động ghép video vào đúng vùng bên phải của ảnh nền! Bạn có thể bấm <b>Phát thử</b> hoặc bấm <b>TẠO VIDEO</b> ngay.'
-      );
+      await attachVideoToComposer(file, 'Đã tải file từ máy tính!');
     } catch (err) {
       showBox(tiktokFeedback, 'error', '❌ ' + err.message);
     }
@@ -206,6 +236,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     btnCreateVideo.disabled = true;
     btnUploadMp4.disabled = true;
+    btnConfirmLink.disabled = true;
     exportQuality.disabled = true;
     btnCancelExport.classList.remove('hidden');
     progressSection.classList.remove('hidden');
@@ -244,6 +275,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } finally {
       btnCreateVideo.disabled = false;
       btnUploadMp4.disabled = false;
+      btnConfirmLink.disabled = false;
       exportQuality.disabled = false;
       btnCancelExport.classList.add('hidden');
     }
@@ -267,7 +299,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     a.remove();
   });
 
-  // Giải phóng bộ nhớ khi đóng trang
   window.addEventListener('beforeunload', () => {
     clearPreviousOutput();
   });
