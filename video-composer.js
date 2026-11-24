@@ -1,7 +1,8 @@
 /**
  * KAI TỒ REVIEW – AUTO VIDEO COMPOSER ENGINE (video-composer.js)
- * Tự động tìm ảnh nền cố định (background.png ở thư mục gốc hoặc assets/)
- * và ghép video vào đúng vùng trống bên phải.
+ * - Tự động tìm ảnh nền cố định (background.png ở thư mục gốc hoặc assets/).
+ * - Video dọc: giữ nguyên bình thường.
+ * - Video ngang: tự động chuyển sang khung dọc 9:16 (không méo hình).
  */
 
 class AutoVideoComposer {
@@ -16,6 +17,12 @@ class AutoVideoComposer {
       wRatio: 0.50,
       hRatio: 0.73
     };
+
+    // CHẾ ĐỘ CHUYỂN VIDEO NGANG -> DỌC 9:16:
+    // 'crop'   = Tự cắt lấy phần giữa thành video dọc 9:16 sắc nét (Mặc định)
+    // 'blur'   = Giữ nguyên hết chiều ngang ở giữa + tự tạo nền mờ trên dưới thành khung dọc 9:16
+    // 'rotate' = Xoay ngang thành dọc 90 độ
+    this.landscapeMode = 'crop';
 
     this.bgImage = null;
     this.bgLoaded = false;
@@ -140,19 +147,78 @@ class AutoVideoComposer {
     this.videoLoaded = false;
   }
 
-  computeVideoRect(canvasW, canvasH, videoW, videoH) {
+  /**
+   * Tính khung hiển thị căn giữa trong vùng bên phải theo tỷ lệ mong muốn
+   */
+  computeVideoRect(canvasW, canvasH, targetRatioW, targetRatioH) {
     const slotX = canvasW * this.videoSlot.xRatio;
     const slotY = canvasH * this.videoSlot.yRatio;
     const slotW = canvasW * this.videoSlot.wRatio;
     const slotH = canvasH * this.videoSlot.hRatio;
 
-    const scale = Math.min(slotW / videoW, slotH / videoH);
-    const drawW = Math.round(videoW * scale);
-    const drawH = Math.round(videoH * scale);
+    const scale = Math.min(slotW / targetRatioW, slotH / targetRatioH);
+    const drawW = Math.round(targetRatioW * scale);
+    const drawH = Math.round(targetRatioH * scale);
     const drawX = Math.round(slotX + (slotW - drawW) / 2);
     const drawY = Math.round(slotY + (slotH - drawH) / 2);
 
     return { x: drawX, y: drawY, w: drawW, h: drawH, slotX, slotY, slotW, slotH };
+  }
+
+  /**
+   * Vẽ video ngang đã được chuyển sang khung dọc 9:16
+   */
+  _drawLandscapeAsVertical(ctx, videoSource, targetW, targetH) {
+    const vw = videoSource.videoWidth;
+    const vh = videoSource.videoHeight;
+
+    // Tạo khung dọc chuẩn 9:16 nằm gọn và căn giữa trong vùng bên phải
+    const box = this.computeVideoRect(targetW, targetH, 9, 16);
+
+    ctx.save();
+    // Giới hạn vùng vẽ gọn trong khung dọc 9:16
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.w, box.h);
+    ctx.clip();
+
+    if (this.landscapeMode === 'blur') {
+      // Kiểu 1: Nền mờ lấp đầy khung dọc 9:16 + video ngang sắc nét giữ đủ hình ở giữa
+      const srcCoverW = vh * (box.w / box.h);
+      const srcCoverX = (vw - srcCoverW) / 2;
+      const pad = 24;
+
+      ctx.save();
+      ctx.filter = 'blur(18px) brightness(0.75)';
+      ctx.drawImage(
+        videoSource,
+        srcCoverX, 0, srcCoverW, vh,
+        box.x - pad, box.y - pad, box.w + pad * 2, box.h + pad * 2
+      );
+      ctx.restore();
+
+      const fgW = box.w;
+      const fgH = Math.round(fgW * (vh / vw));
+      const fgY = Math.round(box.y + (box.h - fgH) / 2);
+      ctx.drawImage(videoSource, 0, 0, vw, vh, box.x, fgY, fgW, fgH);
+    } else if (this.landscapeMode === 'rotate') {
+      // Kiểu 2: Xoay video ngang 90 độ thành video dọc
+      const cx = box.x + box.w / 2;
+      const cy = box.y + box.h / 2;
+      const rotScale = Math.min(box.h / vw, box.w / vh);
+      const rw = vw * rotScale;
+      const rh = vh * rotScale;
+
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(videoSource, -rw / 2, -rh / 2, rw, rh);
+    } else {
+      // Kiểu mặc định ('crop'): Tự cắt phần giữa của video ngang thành dọc 9:16 đầy khung
+      const srcW = vh * (box.w / box.h);
+      const srcX = (vw - srcW) / 2;
+      ctx.drawImage(videoSource, srcX, 0, srcW, vh, box.x, box.y, box.w, box.h);
+    }
+
+    ctx.restore();
   }
 
   composeFrame(ctx, targetW, targetH, videoSource = this.videoEl, isExport = false) {
@@ -164,13 +230,17 @@ class AutoVideoComposer {
     }
 
     if (videoSource && videoSource.readyState >= 2 && videoSource.videoWidth > 0) {
-      const rect = this.computeVideoRect(
-        targetW,
-        targetH,
-        videoSource.videoWidth,
-        videoSource.videoHeight
-      );
-      ctx.drawImage(videoSource, rect.x, rect.y, rect.w, rect.h);
+      const vw = videoSource.videoWidth;
+      const vh = videoSource.videoHeight;
+
+      if (vw > vh) {
+        // Video ngang -> tự động chuyển sang khung dọc 9:16
+        this._drawLandscapeAsVertical(ctx, videoSource, targetW, targetH);
+      } else {
+        // Video dọc hoặc vuông -> hiển thị bình thường
+        const rect = this.computeVideoRect(targetW, targetH, vw, vh);
+        ctx.drawImage(videoSource, rect.x, rect.y, rect.w, rect.h);
+      }
     } else if (!isExport) {
       const sx = targetW * this.videoSlot.xRatio;
       const sy = targetH * this.videoSlot.yRatio;
