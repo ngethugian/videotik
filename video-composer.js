@@ -1,6 +1,7 @@
 /**
  * KAI TỒ REVIEW – AUTO VIDEO COMPOSER ENGINE (video-composer.js)
- * Nạp ảnh nền cố định (assets/background.png) và tự động đặt video vào vùng trống bên phải.
+ * Tự động tìm ảnh nền cố định (background.png ở thư mục gốc hoặc assets/)
+ * và ghép video vào đúng vùng trống bên phải.
  */
 
 class AutoVideoComposer {
@@ -8,27 +9,22 @@ class AutoVideoComposer {
     this.canvas = document.getElementById(canvasId);
     this.ctx = this.canvas.getContext('2d', { alpha: false });
 
-    // Vùng trống bên phải cố định theo đúng ảnh nền gốc (tính theo tỷ lệ 0.0 -> 1.0):
-    // - Tránh chữ "XEM PHUN Ở TỬ SỈU" phía trên (kết thúc ở ~16% chiều cao)
-    // - Tránh chữ "me:" và bàn tay nhân vật 3D bên trái (kết thúc ở ~45% chiều rộng)
+    // Vùng trống bên phải cố định theo đúng ảnh nền gốc
     this.videoSlot = {
-      xRatio: 0.475, // Bắt đầu từ 47.5% chiều rộng
-      yRatio: 0.21,  // Bắt đầu từ 21% chiều cao
-      wRatio: 0.50,  // Chiếm 50% chiều rộng (đến 97.5%, chừa lề phải 2.5%)
-      hRatio: 0.73   // Chiếm 73% chiều cao (đến 94%, chừa lề dưới 6%)
+      xRatio: 0.475,
+      yRatio: 0.21,
+      wRatio: 0.50,
+      hRatio: 0.73
     };
 
-    // Ảnh nền gốc cố định
     this.bgImage = null;
     this.bgLoaded = false;
 
-    // Video đầu vào
     this.videoEl = null;
     this.videoFile = null;
     this.videoUrl = null;
     this.videoLoaded = false;
 
-    // Kích thước Canvas xem trước (mặc định 9:16 chuẩn 1080x1920, sẽ tự khớp tỷ lệ ảnh nền gốc)
     this.width = 1080;
     this.height = 1920;
     this.canvas.width = this.width;
@@ -39,11 +35,17 @@ class AutoVideoComposer {
   }
 
   /**
-   * Nạp ảnh nền cố định từ assets/background.png
-   * (Tự thử thêm assets/background.jpg nếu người dùng quên đổi đuôi file)
+   * Tìm ảnh nền ở cả thư mục gốc (background.png) lẫn thư mục assets/
    */
   async loadFixedBackground() {
-    const paths = ['assets/background.png', 'assets/background.jpg', 'assets/background.jpeg'];
+    const paths = [
+      './background.png',
+      './background.jpg',
+      './background.jpeg',
+      './assets/background.png',
+      './assets/background.jpg',
+      './assets/background.jpeg'
+    ];
 
     for (const src of paths) {
       try {
@@ -51,7 +53,6 @@ class AutoVideoComposer {
         this.bgImage = img;
         this.bgLoaded = true;
 
-        // Giữ nguyên 100% tỷ lệ khung hình ảnh nền gốc, chuẩn hóa chiều rộng 1080p chẵn pixel
         const targetW = 1080;
         const targetH = Math.round((targetW * (img.naturalHeight / img.naturalWidth)) / 2) * 2;
         this.width = targetW;
@@ -81,7 +82,7 @@ class AutoVideoComposer {
   }
 
   /**
-   * Nạp file video MP4 từ máy tính và tự động đưa vào vùng bên phải
+   * Nạp file/Blob video MP4 (từ máy tính hoặc vừa tải tự động từ link TikTok)
    */
   loadVideoFile(file) {
     return new Promise((resolve, reject) => {
@@ -105,16 +106,15 @@ class AutoVideoComposer {
         this.videoUrl = url;
         this.videoLoaded = true;
 
-        // Hiển thị ngay khung hình đầu tiên lên ảnh nền
         video.currentTime = 0.05;
         video.addEventListener('seeked', () => this.renderPreview(), { once: true });
 
         resolve({
-          name: file.name,
+          name: file.name || 'tiktok_video.mp4',
           width: video.videoWidth,
           height: video.videoHeight,
           duration: isFinite(video.duration) ? video.duration : 0,
-          sizeBytes: file.size
+          sizeBytes: file.size || 0
         });
       };
 
@@ -140,10 +140,6 @@ class AutoVideoComposer {
     this.videoLoaded = false;
   }
 
-  /**
-   * Tính tọa độ & kích thước tự động để video nằm gọn, căn giữa trong vùng bên phải
-   * và giữ nguyên 100% tỷ lệ khung hình gốc (không méo, không kéo giãn)
-   */
   computeVideoRect(canvasW, canvasH, videoW, videoH) {
     const slotX = canvasW * this.videoSlot.xRatio;
     const slotY = canvasH * this.videoSlot.yRatio;
@@ -159,21 +155,14 @@ class AutoVideoComposer {
     return { x: drawX, y: drawY, w: drawW, h: drawH, slotX, slotY, slotW, slotH };
   }
 
-  /**
-   * Hàm vẽ khung hình hợp nhất (dùng chung cho cả Xem trước và Xuất MP4)
-   * Đảm bảo file MP4 xuất ra giống 100% bản xem trước.
-   */
   composeFrame(ctx, targetW, targetH, videoSource = this.videoEl, isExport = false) {
-    // 1. Nền trắng dự phòng
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, targetW, targetH);
 
-    // 2. Vẽ nguyên bản 100% ảnh nền gốc cố định (không cắt, không biến dạng)
     if (this.bgLoaded && this.bgImage) {
       ctx.drawImage(this.bgImage, 0, 0, targetW, targetH);
     }
 
-    // 3. Vẽ video vào đúng vùng bên phải
     if (videoSource && videoSource.readyState >= 2 && videoSource.videoWidth > 0) {
       const rect = this.computeVideoRect(
         targetW,
@@ -183,7 +172,6 @@ class AutoVideoComposer {
       );
       ctx.drawImage(videoSource, rect.x, rect.y, rect.w, rect.h);
     } else if (!isExport) {
-      // Khung nét đứt nhẹ trên bản xem trước khi người dùng chưa tải video lên
       const sx = targetW * this.videoSlot.xRatio;
       const sy = targetH * this.videoSlot.yRatio;
       const sw = targetW * this.videoSlot.wRatio;
