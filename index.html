@@ -2,445 +2,137 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>KAI TỒ REVIEW – Image & Video Composer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KAI TỒ REVIEW – Auto Video Composer</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Thư viện đóng gói MP4 mã nguồn mở (miễn phí, chạy trực tiếp trên trình duyệt, không cần COOP/COEP) -->
+  <!-- Thư viện đóng gói MP4 mã nguồn mở (miễn phí, tương thích GitHub Pages) -->
   <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js"></script>
 </head>
 <body>
-  <!-- THANH ĐỈNH (TOP HEADER) -->
-  <header class="app-header">
-    <div class="brand">
-      <span class="brand-badge">KT</span>
-      <div class="brand-text">
-        <h1>KAI TỒ REVIEW</h1>
-        <span>IMAGE & VIDEO COMPOSER</span>
-      </div>
-    </div>
-
-    <div class="header-actions">
-      <button id="btnSaveProject" class="btn btn-dark" title="Lưu cấu hình dự án (.json)">💾 Lưu dự án</button>
-      <button id="btnLoadProject" class="btn btn-dark" title="Mở lại dự án đã lưu">📂 Mở dự án</button>
-      <input type="file" id="inputLoadProject" accept=".json" hidden />
-      <button id="btnResetProject" class="btn btn-dark" title="Xóa toàn bộ và làm lại từ đầu">🔄 Đặt lại</button>
-      <button id="btnOpenExport" class="btn btn-primary">🎬 XUẤT VIDEO MP4</button>
-    </div>
-  </header>
-
-  <!-- CẢNH BÁO BỘ NHỚ / VIDEO NẶNG -->
-  <div id="memoryWarningBanner" class="warning-banner hidden">
-    <span id="memoryWarningText">⚠️ Video tải lên khá nặng, nên đóng bớt tab khác để xuất mượt hơn.</span>
-    <button id="btnDismissWarning" class="btn-icon-sm">✕</button>
-  </div>
-
-  <!-- KHUNG LÀM VIỆC CHÍNH -->
-  <main class="workspace">
-    <!-- 1. THANH CÔNG CỤ BÊN TRÁI -->
-    <aside class="panel left-toolbar">
-      <div class="panel-section">
-        <h3 class="section-title">1. Ảnh nền & Khung hình</h3>
-        <button id="btnUploadBg" class="btn btn-block btn-outline">🖼️ Tải ảnh nền (JPG/PNG/WEBP)</button>
-        <input type="file" id="inputBgImage" accept="image/jpeg,image/png,image/webp" hidden />
-
-        <label class="field-label">Tỷ lệ khung hình</label>
-        <select id="selectAspectRatio" class="input-control">
-          <option value="9:16" selected>9:16 – TikTok / Shorts / Reels (1080×1920)</option>
-          <option value="16:9">16:9 – YouTube ngang (1920×1080)</option>
-          <option value="1:1">1:1 – Vuông Facebook/IG (1080×1080)</option>
-          <option value="custom">Tùy chỉnh kích thước...</option>
-        </select>
-
-        <div id="customSizeGroup" class="custom-size-grid hidden">
-          <div>
-            <label class="mini-label">Rộng (px)</label>
-            <input type="number" id="inputCanvasW" class="input-control" value="1080" min="200" max="3840" step="2" />
-          </div>
-          <div>
-            <label class="mini-label">Cao (px)</label>
-            <input type="number" id="inputCanvasH" class="input-control" value="1920" min="200" max="3840" step="2" />
-          </div>
-          <button id="btnApplyCustomSize" class="btn btn-dark btn-sm full-span">Áp dụng kích thước</button>
+  <div class="app-container">
+    <!-- 1. LOGO THƯƠNG HIỆU KAI TỒ REVIEW -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-logo">KT</div>
+        <div class="brand-info">
+          <h1>KAI TỒ REVIEW</h1>
+          <p>AUTO VIDEO COMPOSER</p>
         </div>
       </div>
+      <div id="codecBadge" class="codec-badge">Đang kiểm tra trình duyệt...</div>
+    </header>
 
-      <div class="panel-section">
-        <h3 class="section-title">2. Thêm Video & Văn bản</h3>
-        <button id="btnUploadVideo" class="btn btn-block btn-primary">🎞️ Thêm Video MP4</button>
-        <input type="file" id="inputVideoFile" accept="video/mp4,video/webm,video/quicktime" multiple hidden />
+    <main class="main-grid">
+      <!-- CỘT TRÁI: NHẬP VIDEO & XUẤT MP4 -->
+      <section class="control-column">
+        <!-- 2. KHU VỰC NHẬP LINK TIKTOK -->
+        <div class="card">
+          <h2 class="card-title">Bước 1: Nhập video đầu vào</h2>
 
-        <button id="btnAddText" class="btn btn-block btn-dark">🔤 Thêm Văn bản lên ảnh</button>
-
-        <div class="tiktok-box">
-          <label class="field-label">Hoặc dán link TikTok (Xem trước Embed)</label>
-          <div class="input-row">
-            <input type="url" id="inputTiktokUrl" class="input-control" placeholder="https://www.tiktok.com/@.../video/..." />
-            <button id="btnAddTiktok" class="btn btn-dark btn-sm">Xác nhận</button>
+          <label class="label" for="tiktokUrlInput">Dán link video TikTok</label>
+          <div class="input-group">
+            <input
+              type="url"
+              id="tiktokUrlInput"
+              class="text-input"
+              placeholder="https://www.tiktok.com/@tenkenh/video/..."
+              autocomplete="off"
+            />
+            <button id="btnConfirmLink" class="btn btn-dark">Xác nhận link</button>
           </div>
-          <div id="tiktokStatus" class="status-note"></div>
-        </div>
-      </div>
+          <div id="tiktokFeedback" class="feedback-box hidden"></div>
 
-      <div class="panel-section">
-        <h3 class="section-title">3. Thu phóng vùng xem trước</h3>
-        <div class="zoom-controls">
-          <button id="btnZoomOut" class="btn btn-dark btn-sm">−</button>
-          <span id="zoomLabel">Vừa khung</span>
-          <button id="btnZoomIn" class="btn btn-dark btn-sm">+</button>
-          <button id="btnZoomFit" class="btn btn-dark btn-sm" title="Căn vừa màn hình">Khớp</button>
-        </div>
-        <p class="hint-text">
-          Mẹo: Nhấn vào video trên khung để kéo thả tự do, kéo 4 góc để phóng to/thu nhỏ, kéo chấm đỏ phía trên để xoay. Dùng phím mũi tên để nhích từng pixel.
-        </p>
-      </div>
-    </aside>
+          <!-- Khung xem trước nhúng TikTok (nếu link hợp lệ có ID) -->
+          <div id="tiktokEmbedWrap" class="tiktok-embed-wrap hidden"></div>
 
-    <!-- 2. KHU VỰC CHỈNH SỬA VÀ XEM TRƯỚC Ở CHÍNH GIỮA -->
-    <section class="center-stage">
-      <div id="canvasViewport" class="canvas-viewport">
-        <div id="canvasWrapper" class="canvas-wrapper">
-          <canvas id="editorCanvas"></canvas>
-          <div id="emptyCanvasHint" class="empty-hint">
-            <div class="empty-icon">🎬</div>
-            <p><strong>KAI TỒ REVIEW COMPOSER</strong></p>
-            <p>Bắt đầu bằng cách nhấn <b>"Tải ảnh nền"</b> và <b>"Thêm Video MP4"</b> ở cột bên trái.</p>
+          <div class="divider"><span>HOẶC CHỌN FILE MP4 TỪ MÁY TÍNH</span></div>
+
+          <!-- 3. NÚT TẢI VIDEO MP4 -->
+          <button id="btnUploadMp4" class="btn btn-outline btn-full">
+            📁 Tải video MP4 từ máy tính
+          </button>
+          <input type="file" id="mp4FileInput" accept="video/mp4,video/webm,video/quicktime" hidden />
+
+          <div id="videoMetaBox" class="video-meta hidden">
+            <div><strong>File đang dùng:</strong> <span id="metaFileName">-</span></div>
+            <div><strong>Độ phân giải gốc:</strong> <span id="metaResolution">-</span></div>
+            <div><strong>Thời lượng:</strong> <span id="metaDuration">-</span> &nbsp;|&nbsp; <strong>Dung lượng:</strong> <span id="metaSize">-</span></div>
           </div>
-        </div>
-      </div>
 
-      <!-- Khung xem trước TikTok Embed (hiện khi dán link TikTok hợp lệ) -->
-      <div id="tiktokPreviewBox" class="tiktok-preview-modal hidden">
-        <div class="tiktok-preview-header">
-          <span>📺 Xem trước TikTok Embed</span>
-          <button id="btnCloseTiktok" class="btn-icon-sm">✕</button>
-        </div>
-        <div id="tiktokIframeContainer" class="tiktok-iframe-wrap"></div>
-        <div class="tiktok-warning">
-          ⚠️ <b>Lưu ý kỹ thuật:</b> Do chính sách bảo mật trình duyệt (CORS) và bản quyền của TikTok, trình duyệt không thể tách luồng pixel từ khung nhúng TikTok để ghép xuất file MP4. Hãy tải video TikTok đó về máy dưới dạng <b>.MP4</b> rồi nhấn nút bên dưới để đưa vào ghép trực tiếp trên ảnh.
-          <button id="btnTiktokToMp4" class="btn btn-primary btn-sm" style="margin-top:8px; width:100%;">🎞️ Tải file MP4 từ máy tính lên ngay</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- 3. BẢNG THUỘC TÍNH CHỈNH SỬA BÊN PHẢI -->
-    <aside class="panel right-properties">
-      <div class="panel-header-row">
-        <h3 class="section-title" style="margin:0;">Thuộc tính đối tượng</h3>
-        <span id="propLayerTypeBadge" class="badge hidden">VIDEO</span>
-      </div>
-
-      <div id="noSelectionMsg" class="no-selection">
-        Chọn một lớp (Ảnh nền, Video hoặc Văn bản) trên khung chỉnh sửa hoặc bảng Layers bên dưới để tinh chỉnh chi tiết.
-      </div>
-
-      <div id="propsContent" class="props-content hidden">
-        <div class="prop-name-row">
-          <strong id="propLayerName">Layer</strong>
-          <button id="btnLockLayer" class="btn btn-dark btn-xs" title="Khóa / Mở khóa vị trí">🔓 Khóa</button>
+          <div id="memoryWarning" class="warning-box hidden"></div>
         </div>
 
-        <!-- Nút thao tác nhanh vị trí -->
-        <div class="quick-grid">
-          <button id="btnCenterH" class="btn btn-dark btn-xs" title="Căn giữa ngang">↔ Giữa ngang</button>
-          <button id="btnCenterV" class="btn btn-dark btn-xs" title="Căn giữa dọc">↕ Giữa dọc</button>
-          <button id="btnResetTransform" class="btn btn-dark btn-xs" title="Đưa về vị trí & kích thước ban đầu">↺ Ban đầu</button>
-          <button id="btnReplaceMedia" class="btn btn-dark btn-xs" title="Thay file ảnh hoặc video khác">🔁 Thay file</button>
-          <input type="file" id="inputReplaceMedia" hidden />
-        </div>
+        <!-- 5, 6, 7. TẠO VIDEO, THANH TIẾN TRÌNH & TẢI VIDEO MP4 -->
+        <div class="card">
+          <h2 class="card-title">Bước 2: Tạo & Tải Video MP4</h2>
 
-        <!-- Di chuyển tinh chỉnh (Trái/Phải/Lên/Xuống) -->
-        <div class="prop-group">
-          <label class="field-label">Di chuyển nhanh (5px)</label>
-          <div class="nudge-row">
-            <button id="btnNudgeLeft" class="btn btn-dark btn-xs">◀ Trái</button>
-            <button id="btnNudgeUp" class="btn btn-dark btn-xs">▲ Lên</button>
-            <button id="btnNudgeDown" class="btn btn-dark btn-xs">▼ Xuống</button>
-            <button id="btnNudgeRight" class="btn btn-dark btn-xs">▶ Phải</button>
-          </div>
-        </div>
-
-        <!-- Vị trí & Kích thước -->
-        <div class="prop-group">
-          <label class="field-label">Vị trí & Kích thước (px)</label>
-          <div class="grid-2">
-            <div>
-              <span class="mini-label">Vị trí X</span>
-              <input type="number" id="propX" class="input-control" step="1" />
-            </div>
-            <div>
-              <span class="mini-label">Vị trí Y</span>
-              <input type="number" id="propY" class="input-control" step="1" />
-            </div>
-            <div>
-              <span class="mini-label">Chiều rộng (W)</span>
-              <input type="number" id="propW" class="input-control" min="20" step="1" />
-            </div>
-            <div>
-              <span class="mini-label">Chiều cao (H)</span>
-              <input type="number" id="propH" class="input-control" min="20" step="1" />
-            </div>
-          </div>
-          <label class="checkbox-row">
-            <input type="checkbox" id="propKeepAspect" checked />
-            <span>Giữ nguyên tỷ lệ khi kéo góc</span>
-          </label>
-        </div>
-
-        <!-- Tỷ lệ hiển thị / Căn khung -->
-        <div class="prop-group" id="propFitGroup">
-          <label class="field-label">Tỷ lệ hiển thị / Căn khung</label>
-          <select id="propFitMode" class="input-control">
-            <option value="">-- Chọn kiểu căn / tỷ lệ --</option>
-            <option value="cover">Lấp đầy khung hình (Cover)</option>
-            <option value="contain">Vừa gọn trong khung (Contain)</option>
-            <option value="original">Trả về tỷ lệ gốc của file</option>
-            <option value="16:9">Ép tỷ lệ 16:9</option>
-            <option value="9:16">Ép tỷ lệ 9:16</option>
-            <option value="1:1">Ép tỷ lệ 1:1 (Vuông)</option>
-            <option value="4:3">Ép tỷ lệ 4:3</option>
-          </select>
-        </div>
-
-        <!-- Góc xoay -->
-        <div class="prop-group">
-          <div class="slider-header">
-            <label class="field-label">Góc xoay (°)</label>
-            <input type="number" id="propRotation" class="input-mini" min="-360" max="360" step="1" value="0" />
-          </div>
-          <input type="range" id="propRotationRange" class="range-control" min="-180" max="180" value="0" />
-        </div>
-
-        <!-- Độ trong suốt -->
-        <div class="prop-group">
-          <div class="slider-header">
-            <label class="field-label">Độ mờ / Trong suốt (%)</label>
-            <input type="number" id="propOpacity" class="input-mini" min="0" max="100" step="1" value="100" />
-          </div>
-          <input type="range" id="propOpacityRange" class="range-control" min="0" max="100" value="100" />
-        </div>
-
-        <!-- Bo góc -->
-        <div class="prop-group">
-          <div class="slider-header">
-            <label class="field-label">Bo góc (px)</label>
-            <input type="number" id="propRadius" class="input-mini" min="0" max="400" step="1" value="0" />
-          </div>
-          <input type="range" id="propRadiusRange" class="range-control" min="0" max="200" value="0" />
-        </div>
-
-        <!-- Cắt viền (Crop) -->
-        <div class="prop-group" id="propCropGroup">
-          <div class="slider-header">
-            <label class="field-label">Cắt khung hình (Crop %)</label>
-            <button id="btnResetCrop" class="btn-link">Đặt lại</button>
-          </div>
-          <div class="crop-grid">
-            <div class="crop-item">
-              <div class="slider-header"><span class="mini-label">Trên</span><input type="number" id="propCropTop" class="input-mini" min="0" max="45" value="0" /></div>
-              <input type="range" id="propCropTopRange" class="range-control" min="0" max="45" value="0" />
-            </div>
-            <div class="crop-item">
-              <div class="slider-header"><span class="mini-label">Dưới</span><input type="number" id="propCropBottom" class="input-mini" min="0" max="45" value="0" /></div>
-              <input type="range" id="propCropBottomRange" class="range-control" min="0" max="45" value="0" />
-            </div>
-            <div class="crop-item">
-              <div class="slider-header"><span class="mini-label">Trái</span><input type="number" id="propCropLeft" class="input-mini" min="0" max="45" value="0" /></div>
-              <input type="range" id="propCropLeftRange" class="range-control" min="0" max="45" value="0" />
-            </div>
-            <div class="crop-item">
-              <div class="slider-header"><span class="mini-label">Phải</span><input type="number" id="propCropRight" class="input-mini" min="0" max="45" value="0" /></div>
-              <input type="range" id="propCropRightRange" class="range-control" min="0" max="45" value="0" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Thuộc tính âm thanh Video -->
-        <div class="prop-group hidden" id="propVideoGroup">
-          <div class="slider-header">
-            <label class="field-label">Âm lượng Video (%)</label>
-            <input type="number" id="propVolume" class="input-mini" min="0" max="100" value="100" />
-          </div>
-          <input type="range" id="propVolumeRange" class="range-control" min="0" max="100" value="100" />
-          <label class="checkbox-row">
-            <input type="checkbox" id="propMuted" />
-            <span>Tắt tiếng lớp video này</span>
-          </label>
-          <div class="mini-info">Thời lượng gốc: <strong id="propVideoDuration">0.0s</strong></div>
-        </div>
-
-        <!-- Thời gian xuất hiện trên Timeline -->
-        <div class="prop-group" id="propTimingGroup">
-          <label class="field-label">Thời gian xuất hiện (giây)</label>
-          <div class="grid-2">
-            <div>
-              <span class="mini-label">Bắt đầu (s)</span>
-              <input type="number" id="propStartTime" class="input-control" min="0" step="0.1" value="0" />
-            </div>
-            <div>
-              <span class="mini-label">Kết thúc (s)</span>
-              <input type="number" id="propEndTime" class="input-control" min="0.1" step="0.1" value="10" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Thuộc tính Văn bản -->
-        <div class="prop-group hidden" id="propTextGroup">
-          <label class="field-label">Nội dung văn bản</label>
-          <textarea id="propTextContent" class="input-control" rows="2"></textarea>
-          <div class="grid-2" style="margin-top:8px;">
-            <div>
-              <span class="mini-label">Cỡ chữ (px)</span>
-              <input type="number" id="propFontSize" class="input-control" min="12" max="260" value="64" />
-            </div>
-            <div>
-              <span class="mini-label">Độ dày viền</span>
-              <input type="number" id="propStrokeWidth" class="input-control" min="0" max="20" value="4" />
-            </div>
-            <div>
-              <span class="mini-label">Màu chữ</span>
-              <input type="color" id="propTextColor" class="input-color" value="#ffffff" />
-            </div>
-            <div>
-              <span class="mini-label">Màu viền chữ</span>
-              <input type="color" id="propStrokeColor" class="input-color" value="#000000" />
-            </div>
-          </div>
-          <div class="grid-2" style="margin-top:8px; align-items:center;">
-            <div>
-              <span class="mini-label">Màu nền chữ</span>
-              <input type="color" id="propTextBg" class="input-color" value="#e50914" />
-            </div>
-            <label class="checkbox-row" style="margin-top:14px;">
-              <input type="checkbox" id="propTextBgTransparent" checked />
-              <span>Nền trong suốt</span>
-            </label>
-          </div>
-        </div>
-      </div>
-    </aside>
-  </main>
-
-  <!-- 4. KHU VỰC QUẢN LÝ LỚP (LAYERS) & TIMELINE PHÍA DƯỚI -->
-  <section class="bottom-dock">
-    <!-- Bảng quản lý lớp -->
-    <div class="layers-panel">
-      <div class="dock-header">
-        <span>📚 Các lớp (Layers)</span>
-        <div class="dock-actions">
-          <button id="btnLayerUp" class="btn btn-dark btn-xs" title="Đưa lớp lên trên">▲</button>
-          <button id="btnLayerDown" class="btn btn-dark btn-xs" title="Đưa lớp xuống dưới">▼</button>
-          <button id="btnLayerDelete" class="btn btn-danger btn-xs" title="Xóa lớp đang chọn">🗑️</button>
-        </div>
-      </div>
-      <div id="layersList" class="layers-list"></div>
-    </div>
-
-    <!-- Khu vực Timeline -->
-    <div class="timeline-panel">
-      <div class="timeline-toolbar">
-        <div class="playback-controls">
-          <button id="btnToStart" class="btn btn-dark btn-xs" title="Về đầu">⏮</button>
-          <button id="btnSeekBack" class="btn btn-dark btn-xs" title="Lùi 2 giây">⏪ -2s</button>
-          <button id="btnPlayPause" class="btn btn-primary btn-xs">▶ Phát</button>
-          <button id="btnSeekFwd" class="btn btn-dark btn-xs" title="Tua tới 2 giây">+2s ⏩</button>
-        </div>
-
-        <div class="time-display">
-          <span id="timeCurrent">00:00.0</span>
-          <span class="time-sep">/</span>
-          <span id="timeTotal">00:10.0</span>
-        </div>
-
-        <div class="duration-setting">
-          <label class="mini-label" for="inputTotalDuration">Tổng thời lượng (s):</label>
-          <input type="number" id="inputTotalDuration" class="input-mini" min="1" max="3600" step="0.5" value="10" />
-        </div>
-      </div>
-
-      <div class="timeline-body">
-        <div id="timelineRuler" class="timeline-ruler" title="Nhấn hoặc kéo để tua thời gian"></div>
-        <div id="timelineTracks" class="timeline-tracks"></div>
-        <div id="timelinePlayhead" class="timeline-playhead"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- MODAL XUẤT VIDEO MP4 -->
-  <div id="exportModal" class="modal-overlay hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3>🎬 Xuất Video MP4 – KAI TỒ REVIEW</h3>
-        <button id="btnCloseExport" class="btn-icon-sm">✕</button>
-      </div>
-      <div class="modal-body">
-        <div id="exportEngineInfo" class="engine-info">Đang kiểm tra bộ mã hóa trình duyệt...</div>
-
-        <div class="grid-2" style="margin-top:12px;">
-          <div>
-            <label class="field-label">Độ phân giải xuất</label>
-            <select id="exportResolution" class="input-control">
-              <option value="1080" selected>Full HD 1080p (Sắc nét nhất)</option>
-              <option value="720">HD 720p (Xuất nhanh, nhẹ máy)</option>
+          <div class="quality-row">
+            <label class="label" for="exportQuality">Chất lượng xuất video</label>
+            <select id="exportQuality" class="select-input">
+              <option value="1080" selected>Full HD 1080p (Ưu tiên – Sắc nét nhất)</option>
+              <option value="720">HD 720p (Xuất nhanh, dung lượng nhẹ)</option>
             </select>
           </div>
-          <div>
-            <label class="field-label">Tốc độ khung hình (FPS)</label>
-            <select id="exportFps" class="input-control">
-              <option value="30" selected>30 FPS (Chuẩn TikTok/YouTube)</option>
-              <option value="24">24 FPS (Nhẹ & nhanh hơn)</option>
-              <option value="60">60 FPS (Mượt cao, tốn thời gian hơn)</option>
-            </select>
-          </div>
-        </div>
 
-        <label class="checkbox-row" style="margin-top:12px;">
-          <input type="checkbox" id="exportIncludeAudio" checked />
-          <span>Giữ và trộn âm thanh từ các lớp video</span>
-        </label>
+          <!-- 5. NÚT TẠO VIDEO -->
+          <div class="action-buttons">
+            <button id="btnCreateVideo" class="btn btn-primary btn-full" disabled>
+              🎬 TẠO VIDEO
+            </button>
+            <button id="btnCancelExport" class="btn btn-dark hidden">Hủy</button>
+          </div>
 
-        <div id="exportProgressBox" class="progress-box hidden">
-          <div class="progress-track">
-            <div id="exportProgressBar" class="progress-fill" style="width:0%"></div>
+          <!-- 6. THANH TIẾN TRÌNH XỬ LÝ -->
+          <div id="progressSection" class="progress-section hidden">
+            <div class="progress-bar-bg">
+              <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+            </div>
+            <div class="progress-info">
+              <span id="progressStatus">Đang chuẩn bị...</span>
+              <strong id="progressPercent">0%</strong>
+            </div>
           </div>
-          <div class="progress-meta">
-            <span id="exportStatusText">Đang chuẩn bị...</span>
-            <strong id="exportProgressText">0%</strong>
-          </div>
+
+          <div id="exportResultMessage" class="feedback-box hidden"></div>
+
+          <!-- 7. NÚT TẢI VIDEO MP4 -->
+          <button id="btnDownloadMp4" class="btn btn-success btn-full hidden">
+            ⬇️ TẢI VIDEO MP4
+          </button>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button id="btnCancelExport" class="btn btn-dark hidden">Hủy xuất</button>
-        <button id="btnStartExport" class="btn btn-primary">🚀 Bắt đầu xuất MP4</button>
-      </div>
-    </div>
+      </section>
+
+      <!-- 4. CỘT PHẢI: KHU VỰC XEM TRƯỚC VIDEO ĐÃ GHÉP -->
+      <section class="preview-column">
+        <div class="card preview-card">
+          <div class="preview-header">
+            <h2 class="card-title" style="margin:0;">Xem trước video thành phẩm</h2>
+            <span id="previewTime" class="time-pill">00:00 / 00:00</span>
+          </div>
+
+          <div class="canvas-stage">
+            <canvas id="previewCanvas"></canvas>
+            <div id="bgErrorOverlay" class="bg-error-overlay hidden">
+              <p><strong>⚠️ Chưa tải được ảnh nền cố định!</strong></p>
+              <p>Hãy chắc chắn bạn đã đặt file ảnh nền vào đúng đường dẫn <code>assets/background.png</code> và mở website qua GitHub Pages (hoặc máy chủ nội bộ).</p>
+            </div>
+          </div>
+
+          <div class="preview-controls">
+            <button id="btnPlayPreview" class="btn btn-dark" disabled>▶ Phát thử</button>
+            <button id="btnRestartPreview" class="btn btn-dark" disabled>⏮ Về đầu</button>
+          </div>
+          <p class="preview-note">
+            Ảnh nền cố định được giữ nguyên 100%. Video đầu vào tự động căn giữa vào khoảng trắng bên phải mà không làm méo hình.
+          </p>
+        </div>
+      </section>
+    </main>
   </div>
 
-  <!-- MODAL NẠP LẠI FILE KHI MỞ DỰ ÁN -->
-  <div id="relinkModal" class="modal-overlay hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3>📂 Nạp lại file media cho dự án</h3>
-        <button id="btnCloseRelink" class="btn-icon-sm">✕</button>
-      </div>
-      <div class="modal-body">
-        <p class="hint-text" style="margin-bottom:10px;">
-          Vì lý do bảo mật, trình duyệt không tự đọc trực tiếp file từ ổ cứng. Hãy chọn lại các file ảnh/video tương ứng bên dưới để khôi phục nguyên vẹn vị trí và hiệu ứng đã lưu:
-        </p>
-        <div id="relinkList" class="relink-list"></div>
-      </div>
-      <div class="modal-footer">
-        <button id="btnDoneRelink" class="btn btn-primary">Hoàn tất</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- THÔNG BÁO TOAST -->
-  <div id="toastContainer" class="toast-container"></div>
-
-  <!-- NẠP CÁC MODULE THEO ĐÚNG THỨ TỰ -->
-  <script src="editor.js"></script>
+  <!-- Nạp các module xử lý -->
+  <script src="video-composer.js"></script>
   <script src="video-export.js"></script>
-  <script src="project-manager.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
