@@ -1,6 +1,6 @@
 /**
  * KAI TỒ REVIEW – REAL MP4 EXPORTER (video-export.js)
- * Tương thích đầy đủ cả Windows (Chrome/Edge/Cốc Cốc), Android và iPhone (Safari iOS).
+ * Xuất MP4 chuẩn H.264 + âm thanh gốc AAC trên cả iPhone (Safari), Android và Windows.
  */
 
 class AutoVideoExporter {
@@ -14,7 +14,7 @@ class AutoVideoExporter {
   }
 
   /**
-   * Kiểm tra trình duyệt có hỗ trợ xuất MP4 WebCodecs (H.264 + AAC) hay không
+   * Kiểm tra cấu hình mã hóa H.264 và âm thanh AAC tương thích thiết bị
    */
   async checkSupport() {
     const hasMuxer = typeof window.Mp4Muxer !== 'undefined';
@@ -23,20 +23,23 @@ class AutoVideoExporter {
     if (hasMuxer && hasWebCodecs) {
       const avcCodec = await this._pickAvcCodec(720, 1280, 24);
       if (avcCodec) {
-        const hasAac = typeof window.AudioEncoder !== 'undefined' && (await this._checkAacSupport());
-        return {
-          mode: 'webcodecs',
-          hasAac,
-          label: this.isIOS
-            ? '✅ Sẵn sàng xuất MP4 chuẩn iPhone (H.264 + AAC)'
-            : (this.isMobile
-              ? '✅ Sẵn sàng xuất MP4 (Chế độ điện thoại)'
-              : '✅ Sẵn sàng xuất MP4 H.264 (Tăng tốc GPU)'),
-          ok: true
-        };
+        const aacConfig = await this._pickAacConfig();
+        if (aacConfig) {
+          return {
+            mode: 'webcodecs',
+            aacConfig,
+            label: this.isIOS
+              ? '✅ Sẵn sàng xuất MP4 iPhone (Hình + Âm thanh AAC)'
+              : (this.isMobile
+                ? '✅ Sẵn sàng xuất MP4 (Hình + Âm thanh)'
+                : '✅ Sẵn sàng xuất MP4 H.264 + AAC (GPU)'),
+            ok: true
+          };
+        }
       }
     }
 
+    // Nếu trình duyệt không hỗ trợ AudioEncoder AAC nhưng có MediaRecorder MP4 (ví dụ iOS cũ)
     if (typeof window.MediaRecorder !== 'undefined') {
       const mimeType = MediaRecorder.isTypeSupported('video/mp4')
         ? 'video/mp4'
@@ -46,8 +49,8 @@ class AutoVideoExporter {
       return {
         mode: 'mediarecorder',
         mimeType,
-        label: '⚠️ Chế độ dự phòng (Khuyên dùng Safari/Chrome bản mới)',
-        ok: false
+        label: '✅ Sẵn sàng xuất video kèm âm thanh (Chế độ tương thích)',
+        ok: true
       };
     }
 
@@ -59,7 +62,6 @@ class AutoVideoExporter {
   }
 
   async _pickAvcCodec(width, height, fps) {
-    // Trên iPhone ưu tiên Main/Baseline Profile để ứng dụng Ảnh (Photos) luôn mở được
     const codecs = this.isIOS
       ? ['avc1.4d002a', 'avc1.4d001f', 'avc1.42001f', 'avc1.64002a']
       : ['avc1.64002a', 'avc1.4d002a', 'avc1.640028', 'avc1.420028', 'avc1.42001f'];
@@ -80,18 +82,30 @@ class AutoVideoExporter {
     return null;
   }
 
-  async _checkAacSupport() {
-    try {
-      const res = await AudioEncoder.isConfigSupported({
-        codec: 'mp4a.40.2',
-        sampleRate: 48000,
-        numberOfChannels: 2,
-        bitrate: 128_000
-      });
-      return !!res.supported;
-    } catch (_) {
-      return false;
+  /**
+   * Tự động dò tần số âm thanh AAC mà thiết bị hỗ trợ (iPhone dùng 44100Hz, PC dùng 48000Hz)
+   */
+  async _pickAacConfig() {
+    if (typeof window.AudioEncoder === 'undefined') return null;
+
+    const sampleRates = this.isIOS ? [44100, 48000] : [48000, 44100];
+    const bitrates = [128_000, 96_000];
+
+    for (const sampleRate of sampleRates) {
+      for (const bitrate of bitrates) {
+        try {
+          const cfg = {
+            codec: 'mp4a.40.2',
+            sampleRate,
+            numberOfChannels: 2,
+            bitrate
+          };
+          const res = await AudioEncoder.isConfigSupported(cfg);
+          if (res.supported) return cfg;
+        } catch (_) {}
+      }
     }
+    return null;
   }
 
   cancel() {
@@ -129,7 +143,7 @@ class AutoVideoExporter {
           width,
           height,
           fps: effectiveFps,
-          includeAudio: support.hasAac,
+          aacConfig: support.aacConfig,
           onProgress
         });
         return {
@@ -162,7 +176,7 @@ class AutoVideoExporter {
   /* =========================================================
      PHƯƠNG ÁN CHÍNH: WEBCODECS (H.264 AVCC + AAC) + MP4-MUXER
      ========================================================= */
-  async _renderWithWebCodecs({ width, height, fps, includeAudio, onProgress }) {
+  async _renderWithWebCodecs({ width, height, fps, aacConfig, onProgress }) {
     const duration = this.composer.videoEl.duration;
     if (!isFinite(duration) || duration <= 0) {
       throw new Error('Không xác định được thời lượng video đầu vào.');
@@ -176,11 +190,15 @@ class AutoVideoExporter {
       throw new Error(`Thiết bị không hỗ trợ mã hóa H.264 ở mức ${width}×${height}. Hãy chọn HD 720p.`);
     }
 
-    // Bước 1: Giải mã âm thanh gốc của video
+    // Bước 1: Giải mã và chuẩn hóa âm thanh gốc của video theo đúng sampleRate hỗ trợ
     let audioBuffer = null;
-    if (includeAudio) {
+    if (aacConfig) {
       onProgress?.(3, 'Đang tách âm thanh gốc của video...');
-      audioBuffer = await this._decodeOriginalAudio(this.composer.videoFile, duration);
+      audioBuffer = await this._decodeOriginalAudio(
+        this.composer.videoFile,
+        duration,
+        aacConfig.sampleRate
+      );
     }
 
     if (this.cancelled) throw new Error('Đã hủy quá trình tạo video.');
@@ -191,25 +209,25 @@ class AutoVideoExporter {
       video: { codec: 'avc', width, height },
       fastStart: 'in-memory'
     };
-    if (audioBuffer) {
+    if (audioBuffer && aacConfig) {
       muxerConfig.audio = {
         codec: 'aac',
         numberOfChannels: 2,
-        sampleRate: 48000
+        sampleRate: aacConfig.sampleRate
       };
     }
     const muxer = new window.Mp4Muxer.Muxer(muxerConfig);
 
-    // Bước 3: Mã hóa âm thanh AAC
-    if (audioBuffer) {
-      onProgress?.(8, 'Đang mã hóa âm thanh AAC...');
-      await this._encodeAacAudio(audioBuffer, muxer);
+    // Bước 3: Mã hóa âm thanh AAC vào file MP4
+    if (audioBuffer && aacConfig) {
+      onProgress?.(8, 'Đang ghép âm thanh AAC...');
+      await this._encodeAacAudio(audioBuffer, aacConfig, muxer);
       audioBuffer = null;
     }
 
     if (this.cancelled) throw new Error('Đã hủy quá trình tạo video.');
 
-    // Bước 4: Khởi tạo VideoEncoder H.264 chuẩn AVCC (bắt buộc để iPhone đọc được)
+    // Bước 4: Khởi tạo VideoEncoder H.264 chuẩn AVCC
     let encodeError = null;
     let encodedChunksCount = 0;
     const videoEncoder = new VideoEncoder({
@@ -242,7 +260,6 @@ class AutoVideoExporter {
     offCanvas.height = height;
     const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-    // Đặt video giải mã ngay góc màn hình (không đặt -9999px vì Safari iOS sẽ ngừng giải mã video ngoài khung nhìn)
     const workerVideo = document.createElement('video');
     workerVideo.src = this.composer.videoUrl;
     workerVideo.muted = true;
@@ -267,12 +284,10 @@ class AutoVideoExporter {
         const targetTime = Math.min(i / fps, Math.max(0, duration - 0.02));
         await this._seekVideo(workerVideo, targetTime);
 
-        // Chờ 1 nhịp vẽ trình duyệt để Safari iOS cập nhật xong khung hình video mới nhất
         if (this.isIOS) {
           await new Promise(r => requestAnimationFrame(r));
         }
 
-        // Vẽ ảnh nền gốc + video đúng vùng bên phải lên canvas xuất
         this.composer.composeFrame(offCtx, width, height, workerVideo, true);
 
         const frame = new VideoFrame(offCanvas, {
@@ -289,7 +304,7 @@ class AutoVideoExporter {
 
         if (i % 3 === 0 || i === totalFrames - 1) {
           const pct = 10 + Math.round(((i + 1) / totalFrames) * 86);
-          onProgress?.(pct, `Đang ghép & mã hóa khung hình ${i + 1}/${totalFrames}...`);
+          onProgress?.(pct, `Đang ghép hình & tiếng ${i + 1}/${totalFrames}...`);
         }
       }
 
@@ -321,13 +336,28 @@ class AutoVideoExporter {
     }
   }
 
-  async _decodeOriginalAudio(file, duration) {
+  /**
+   * Giải mã âm thanh gốc từ file MP4/TikTok bằng AudioContext + OfflineAudioContext
+   */
+  async _decodeOriginalAudio(file, duration, targetSampleRate) {
+    let audioCtx = null;
     try {
       const arrayBuf = await file.arrayBuffer();
-      const sampleRate = 48000;
-      const totalSamples = Math.ceil(duration * sampleRate);
-      const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
-      const decoded = await offlineCtx.decodeAudioData(arrayBuf.slice(0));
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioCtxClass();
+
+      const decoded = await new Promise((resolve, reject) => {
+        const res = audioCtx.decodeAudioData(arrayBuf.slice(0), resolve, reject);
+        if (res && typeof res.then === 'function') {
+          res.then(resolve).catch(reject);
+        }
+      });
+
+      if (!decoded || decoded.length === 0) return null;
+
+      // Chuyển đổi về đúng stereo 2 kênh và tần số targetSampleRate (44100Hz trên iPhone)
+      const totalSamples = Math.max(1, Math.ceil(duration * targetSampleRate));
+      const offlineCtx = new OfflineAudioContext(2, totalSamples, targetSampleRate);
 
       const source = offlineCtx.createBufferSource();
       source.buffer = decoded;
@@ -336,12 +366,16 @@ class AutoVideoExporter {
 
       return await offlineCtx.startRendering();
     } catch (err) {
-      console.warn('Video không có kênh âm thanh hoặc không giải mã được âm thanh:', err);
+      console.warn('Không tách được âm thanh từ video gốc:', err);
       return null;
+    } finally {
+      if (audioCtx && typeof audioCtx.close === 'function') {
+        try { await audioCtx.close(); } catch (_) {}
+      }
     }
   }
 
-  async _encodeAacAudio(audioBuffer, muxer) {
+  async _encodeAacAudio(audioBuffer, aacConfig, muxer) {
     const sampleRate = audioBuffer.sampleRate;
     const totalFrames = audioBuffer.length;
     const left = audioBuffer.getChannelData(0);
@@ -357,10 +391,10 @@ class AutoVideoExporter {
       codec: 'mp4a.40.2',
       sampleRate,
       numberOfChannels: 2,
-      bitrate: 128_000
+      bitrate: aacConfig.bitrate || 128_000
     });
 
-    const chunkSize = 4096;
+    const chunkSize = 2048;
     for (let offset = 0; offset < totalFrames; offset += chunkSize) {
       if (audioErr) throw audioErr;
       const frames = Math.min(chunkSize, totalFrames - offset);
@@ -404,7 +438,7 @@ class AutoVideoExporter {
   }
 
   /* =========================================================
-     PHƯƠNG ÁN DỰ PHÒNG: MEDIARECORDER THỜI GIAN THỰC
+     PHƯƠNG ÁN DỰ PHÒNG: MEDIARECORDER CÓ THU ÂM THANH
      ========================================================= */
   async _renderWithMediaRecorder({ width, height, fps, mimeType, onProgress }) {
     const vid = this.composer.videoEl;
@@ -416,9 +450,22 @@ class AutoVideoExporter {
     const offCtx = offCanvas.getContext('2d', { alpha: false });
 
     const canvasStream = offCanvas.captureStream(fps);
-    if (typeof vid.captureStream === 'function') {
-      const vidStream = vid.captureStream();
-      vidStream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+    let audioCtx = null;
+
+    // Thu âm thanh trực tiếp qua AudioContext (hoạt động trên cả iOS Safari)
+    try {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioCtxClass();
+      const source = audioCtx.createMediaElementSource(vid);
+      const dest = audioCtx.createMediaStreamDestination();
+      source.connect(dest);
+      source.connect(audioCtx.destination);
+      dest.stream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+    } catch (_) {
+      if (typeof vid.captureStream === 'function') {
+        const vidStream = vid.captureStream();
+        vidStream.getAudioTracks().forEach(track => canvasStream.addTrack(track));
+      }
     }
 
     const chunks = [];
@@ -434,6 +481,7 @@ class AutoVideoExporter {
       recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
     });
 
+    vid.muted = false;
     vid.currentTime = 0;
     recorder.start(250);
     await vid.play();
@@ -447,7 +495,7 @@ class AutoVideoExporter {
         }
         this.composer.composeFrame(offCtx, width, height, vid, true);
         const pct = Math.min(99, Math.round((vid.currentTime / duration) * 100));
-        onProgress?.(pct, `Đang ghi video (${vid.currentTime.toFixed(1)}s / ${duration.toFixed(1)}s)...`);
+        onProgress?.(pct, `Đang ghi hình & âm thanh (${vid.currentTime.toFixed(1)}s / ${duration.toFixed(1)}s)...`);
 
         if (vid.ended || vid.currentTime >= duration - 0.05) {
           vid.pause();
@@ -459,6 +507,10 @@ class AutoVideoExporter {
       };
       requestAnimationFrame(drawLoop);
     });
+
+    if (audioCtx) {
+      try { await audioCtx.close(); } catch (_) {}
+    }
 
     onProgress?.(100, 'Tạo video hoàn tất!');
     return await donePromise;
